@@ -177,6 +177,10 @@ private data class ChatCallbacks(
     val onCommandsQueryChanged: (String) -> Unit,
     val onCommandSelected: (SlashCommandInfo) -> Unit,
     val onCopyLastResponse: () -> Unit,
+    val onStartEditingSessionName: () -> Unit,
+    val onStopEditingSessionName: () -> Unit,
+    val onSessionNameDraftChanged: (String) -> Unit,
+    val onConfirmSessionNameChange: () -> Unit,
     // Bash callbacks
     val onShowBashDialog: () -> Unit,
     val onHideBashDialog: () -> Unit,
@@ -306,6 +310,10 @@ fun ChatRoute(
                 onCommandsQueryChanged = chatViewModel::onCommandsQueryChanged,
                 onCommandSelected = chatViewModel::onCommandSelected,
                 onCopyLastResponse = chatViewModel::copyLastResponse,
+                onStartEditingSessionName = chatViewModel::startEditingSessionName,
+                onStopEditingSessionName = chatViewModel::stopEditingSessionName,
+                onSessionNameDraftChanged = chatViewModel::onSessionNameDraftChanged,
+                onConfirmSessionNameChange = chatViewModel::confirmSessionNameChange,
                 onShowBashDialog = chatViewModel::showBashDialog,
                 onHideBashDialog = chatViewModel::hideBashDialog,
                 onBashCommandChanged = chatViewModel::onBashCommandChanged,
@@ -500,6 +508,8 @@ private fun ChatScreenContent(
             sessionCoherencyWarning = state.sessionCoherencyWarning,
             extensionTitle = state.extensionTitle,
             sessionName = state.sessionName,
+            isEditingSessionName = state.isEditingSessionName,
+            sessionNameDraft = state.sessionNameDraft,
             cwd = state.cwd,
             pendingMessageCount = state.pendingMessageCount,
             connectionState = state.connectionState,
@@ -574,6 +584,8 @@ private fun ChatHeader(
     sessionCoherencyWarning: String?,
     extensionTitle: String?,
     sessionName: String?,
+    isEditingSessionName: Boolean,
+    sessionNameDraft: String,
     cwd: String?,
     pendingMessageCount: Int,
     connectionState: com.ayagmar.pimobile.corenet.ConnectionState,
@@ -594,16 +606,57 @@ private fun ChatHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                val title = extensionTitle ?: sessionName ?: "Chat"
-                Text(
-                    text = title,
-                    style =
-                        if (isCompact) {
-                            MaterialTheme.typography.titleMedium
-                        } else {
-                            MaterialTheme.typography.headlineSmall
-                        },
-                )
+                if (isEditingSessionName) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedTextField(
+                            value = sessionNameDraft,
+                            onValueChange = callbacks.onSessionNameDraftChanged,
+                            modifier = Modifier.weight(1f).heightIn(max = 60.dp),
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.titleMedium,
+                            label = { Text("Session Name") },
+                        )
+                        IconButton(onClick = callbacks.onConfirmSessionNameChange) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Save")
+                        }
+                        IconButton(onClick = callbacks.onStopEditingSessionName) {
+                            Icon(Icons.Default.Close, contentDescription = "Cancel")
+                        }
+                    }
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        val title = extensionTitle ?: sessionName ?: "Chat"
+                        Text(
+                            text = title,
+                            style =
+                                if (isCompact) {
+                                    MaterialTheme.typography.titleMedium
+                                } else {
+                                    MaterialTheme.typography.headlineSmall
+                                },
+                        )
+
+                        if (extensionTitle == null) {
+                            IconButton(
+                                onClick = callbacks.onStartEditingSessionName,
+                                modifier = Modifier.size(24.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Edit name",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.outline,
+                                )
+                            }
+                        }
+                    }
+                }
 
                 if (extensionTitle == null) {
                     Column {

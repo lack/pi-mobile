@@ -527,6 +527,45 @@ class ChatViewModel(
         }
     }
 
+    fun startEditingSessionName() {
+        val currentName = _uiState.value.sessionName ?: ""
+        _uiState.update {
+            it.copy(
+                isEditingSessionName = true,
+                sessionNameDraft = currentName,
+            )
+        }
+    }
+
+    fun stopEditingSessionName() {
+        _uiState.update { it.copy(isEditingSessionName = false) }
+    }
+
+    fun onSessionNameDraftChanged(newName: String) {
+        _uiState.update { it.copy(sessionNameDraft = newName) }
+    }
+
+    fun confirmSessionNameChange() {
+        val newName = _uiState.value.sessionNameDraft.trim()
+        if (newName.isBlank()) {
+            stopEditingSessionName()
+            return
+        }
+
+        viewModelScope.launch {
+            markLocalSessionMutationExpected()
+            val result = sessionController.renameSession(newName)
+            if (result.isSuccess) {
+                _uiState.update { it.copy(sessionName = newName, isEditingSessionName = false) }
+                addSystemNotification(message = "Session renamed to \"$newName\"", type = "info")
+            } else {
+                _uiState.update {
+                    it.copy(errorMessage = result.exceptionOrNull()?.message, isEditingSessionName = false)
+                }
+            }
+        }
+    }
+
     private fun runRenameSlashCommand(args: String?) {
         val newName = args?.trim().orEmpty()
         if (newName.isBlank()) {
@@ -2799,6 +2838,8 @@ data class ChatUiState(
     val currentModel: ModelInfo? = null,
     val thinkingLevel: String? = null,
     val sessionName: String? = null,
+    val isEditingSessionName: Boolean = false,
+    val sessionNameDraft: String = "",
     val cwd: String? = null,
     val pendingMessageCount: Int = 0,
     val activeExtensionRequest: ExtensionUiRequest? = null,
