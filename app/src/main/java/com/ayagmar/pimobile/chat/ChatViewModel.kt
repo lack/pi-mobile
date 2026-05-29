@@ -752,6 +752,7 @@ class ChatViewModel(
                 stopSessionFreshnessMonitor()
             }
         } else {
+            _uiState.update { it.copy(cwd = freshness.cwd) }
             latestSessionPath = freshness.sessionPath
             val previous = lastKnownSessionFreshness
 
@@ -1673,6 +1674,7 @@ class ChatViewModel(
                         followUpMode = stateData.deliveryModeField("followUpMode", "follow_up_mode"),
                         sessionPath = stateData?.stringField("sessionFile"),
                         sessionName = stateData?.stringField("sessionName"),
+                        cwd = stateData?.stringField("cwd"),
                         pendingMessageCount = stateData?.intField("pendingMessageCount") ?: 0,
                     )
 
@@ -1781,6 +1783,7 @@ class ChatViewModel(
             steeringMode = metadata.steeringMode,
             followUpMode = metadata.followUpMode,
             sessionName = metadata.sessionName,
+            cwd = metadata.cwd,
             pendingMessageCount = metadata.pendingMessageCount,
         )
     }
@@ -1823,6 +1826,7 @@ class ChatViewModel(
             steeringMode = metadata.steeringMode,
             followUpMode = metadata.followUpMode,
             sessionName = metadata.sessionName,
+            cwd = metadata.cwd,
             pendingMessageCount = metadata.pendingMessageCount,
         )
     }
@@ -2795,6 +2799,7 @@ data class ChatUiState(
     val currentModel: ModelInfo? = null,
     val thinkingLevel: String? = null,
     val sessionName: String? = null,
+    val cwd: String? = null,
     val pendingMessageCount: Int = 0,
     val activeExtensionRequest: ExtensionUiRequest? = null,
     val notifications: List<ExtensionNotification> = emptyList(),
@@ -2966,6 +2971,7 @@ private data class InitialLoadMetadata(
     val followUpMode: String,
     val sessionPath: String?,
     val sessionName: String?,
+    val cwd: String?,
     val pendingMessageCount: Int,
 )
 

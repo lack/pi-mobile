@@ -500,6 +500,7 @@ private fun ChatScreenContent(
             sessionCoherencyWarning = state.sessionCoherencyWarning,
             extensionTitle = state.extensionTitle,
             sessionName = state.sessionName,
+            cwd = state.cwd,
             pendingMessageCount = state.pendingMessageCount,
             connectionState = state.connectionState,
             currentModel = state.currentModel,
@@ -573,6 +574,7 @@ private fun ChatHeader(
     sessionCoherencyWarning: String?,
     extensionTitle: String?,
     sessionName: String?,
+    cwd: String?,
     pendingMessageCount: Int,
     connectionState: com.ayagmar.pimobile.corenet.ConnectionState,
     currentModel: ModelInfo?,
@@ -603,20 +605,31 @@ private fun ChatHeader(
                         },
                 )
 
-                if (!isCompact && extensionTitle == null) {
-                    Text(
-                        text = formatConnectionSummary(connectionState, pendingMessageCount),
-                        style = MaterialTheme.typography.bodySmall,
-                        color =
-                            when (connectionState) {
-                                com.ayagmar.pimobile.corenet.ConnectionState.CONNECTED ->
-                                    MaterialTheme.colorScheme.primary
-                                com.ayagmar.pimobile.corenet.ConnectionState.CONNECTING,
-                                com.ayagmar.pimobile.corenet.ConnectionState.RECONNECTING,
-                                -> MaterialTheme.colorScheme.tertiary
-                                else -> MaterialTheme.colorScheme.outline
-                            },
-                    )
+                if (extensionTitle == null) {
+                    Column {
+                        if (!isCompact) {
+                            Text(
+                                text = formatConnectionSummary(connectionState, pendingMessageCount),
+                                style = MaterialTheme.typography.bodySmall,
+                                color =
+                                    when (connectionState) {
+                                        com.ayagmar.pimobile.corenet.ConnectionState.CONNECTED ->
+                                            MaterialTheme.colorScheme.primary
+                                        com.ayagmar.pimobile.corenet.ConnectionState.CONNECTING,
+                                        com.ayagmar.pimobile.corenet.ConnectionState.RECONNECTING,
+                                        -> MaterialTheme.colorScheme.tertiary
+                                        else -> MaterialTheme.colorScheme.outline
+                                    },
+                            )
+                        }
+                        if (!cwd.isNullOrBlank()) {
+                            Text(
+                                text = cwd,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.outline,
+                            )
+                        }
+                    }
                 }
             }
 
