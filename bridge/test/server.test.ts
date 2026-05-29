@@ -17,6 +17,7 @@ import type {
 import type { PiRpcForwarder } from "../src/rpc-forwarder.js";
 import type { BridgeServer } from "../src/server.js";
 import { buildPiRpcArgs, createBridgeServer } from "../src/server.js";
+import { DEFAULT_SESSION_DIRECTORY } from "../src/config.js";
 import type {
     SessionFreshnessSnapshot,
     SessionIndexGroup,
@@ -34,6 +35,20 @@ describe("buildPiRpcArgs", () => {
             "rpc",
             "--session-dir",
             "/tmp/custom-sessions",
+            "--extension",
+            path.resolve(bridgeDir, "src/extensions/pi-mobile-tree.ts"),
+            "--extension",
+            path.resolve(bridgeDir, "src/extensions/pi-mobile-workflows.ts"),
+        ]);
+    });
+
+    it("omits --session-dir when using the default directory", () => {
+        const bridgeDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+        const args = buildPiRpcArgs(DEFAULT_SESSION_DIRECTORY);
+
+        expect(args).toEqual([
+            "--mode",
+            "rpc",
             "--extension",
             path.resolve(bridgeDir, "src/extensions/pi-mobile-tree.ts"),
             "--extension",
@@ -1216,7 +1231,7 @@ describe("bridge websocket server", () => {
 
     it("imports JSONL session content into the active runtime session directory", async () => {
         const fakeProcessManager = new FakeProcessManager();
-        const sessionDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "pi-mobile-import-"));
+        const sessionDirectory = path.join(os.tmpdir(), "pi-mobile-import-" + randomUUID());
         const logger = createLogger("silent");
         const server = createBridgeServer(
             {
@@ -1242,13 +1257,14 @@ describe("bridge websocket server", () => {
         });
         await waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_hello");
 
+        const cwd = "/tmp/import-project";
         const waitForCwdSet = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_cwd_set");
         ws.send(
             JSON.stringify({
                 channel: "bridge",
                 payload: {
                     type: "bridge_set_cwd",
-                    cwd: "/tmp/import-project",
+                    cwd,
                 },
             }),
         );
@@ -1265,7 +1281,7 @@ describe("bridge websocket server", () => {
         );
         await waitForControl;
 
-        const importContent = '{"type":"session","id":"header-1","version":3,"cwd":"/tmp/import-project"}\n';
+        const importContent = '{"type":"session","id":"header-1","version":3,"cwd":"' + cwd + '"}\n';
         const waitForImport = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_session_imported");
 
         ws.send(
@@ -1282,12 +1298,14 @@ describe("bridge websocket server", () => {
         const importEnvelope = await waitForImport;
         const sessionPath = importEnvelope.payload?.sessionPath;
         expect(typeof sessionPath).toBe("string");
+
+        // Since we are using a custom sessionDirectory, it should be stored flat.
         expect(path.dirname(sessionPath as string)).toBe(sessionDirectory);
         expect(path.basename(sessionPath as string)).toBe("shared-session.jsonl");
         expect(await fs.readFile(sessionPath as string, "utf8")).toBe(importContent);
 
         const switchPayload = fakeProcessManager.sentPayloads.at(-1)?.payload;
-        expect(fakeProcessManager.sentPayloads.at(-1)?.cwd).toBe("/tmp/import-project");
+        expect(fakeProcessManager.sentPayloads.at(-1)?.cwd).toBe(cwd);
         expect(switchPayload?.type).toBe("switch_session");
         expect(switchPayload?.sessionPath).toBe(sessionPath);
 

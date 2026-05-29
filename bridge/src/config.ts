@@ -8,7 +8,7 @@ const DEFAULT_PORT = 8787;
 const DEFAULT_LOG_LEVEL: LevelWithSilent = "info";
 const DEFAULT_PROCESS_IDLE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_RECONNECT_GRACE_MS = 30 * 1000;
-const DEFAULT_SESSION_DIRECTORY = path.join(os.homedir(), ".pi", "agent", "sessions");
+export const DEFAULT_SESSION_DIRECTORY = path.join(os.homedir(), ".pi", "agent", "sessions");
 
 export interface BridgeConfig {
     host: string;
@@ -121,5 +121,10 @@ function parseSessionDirectory(sessionDirectoryRaw: string | undefined): string 
     const fromEnv = sessionDirectoryRaw?.trim();
     if (!fromEnv) return DEFAULT_SESSION_DIRECTORY;
 
-    return path.resolve(fromEnv);
+    let expanded = fromEnv;
+    if (fromEnv.startsWith("~")) {
+        expanded = path.join(os.homedir(), fromEnv.slice(1));
+    }
+
+    return path.resolve(expanded);
 }

@@ -43,6 +43,25 @@ describe("parseBridgeConfig", () => {
         expect(config.enableHealthEndpoint).toBe(false);
     });
 
+    it("expands tilde in BRIDGE_SESSION_DIR", () => {
+        const config = parseBridgeConfig({
+            BRIDGE_AUTH_TOKEN: "test-token",
+            BRIDGE_SESSION_DIR: "~/.pi/custom-sessions",
+        });
+
+        expect(config.sessionDirectory).toBe(path.join(os.homedir(), ".pi/custom-sessions"));
+    });
+
+    it("preserves absolute paths in BRIDGE_SESSION_DIR", () => {
+        const absPath = path.resolve("/tmp/abs-sessions");
+        const config = parseBridgeConfig({
+            BRIDGE_AUTH_TOKEN: "test-token",
+            BRIDGE_SESSION_DIR: absPath,
+        });
+
+        expect(config.sessionDirectory).toBe(absPath);
+    });
+
     it("fails on invalid port", () => {
         expect(() =>
             parseBridgeConfig({ BRIDGE_PORT: "invalid", BRIDGE_AUTH_TOKEN: "test-token" }),

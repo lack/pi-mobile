@@ -8,6 +8,7 @@ import type { Logger } from "pino";
 import { WebSocket as WsWebSocket, WebSocketServer, type RawData, type WebSocket } from "ws";
 
 import type { BridgeConfig } from "./config.js";
+import { DEFAULT_SESSION_DIRECTORY } from "./config.js";
 import type { PiProcessManager } from "./process-manager.js";
 import { createPiProcessManager } from "./process-manager.js";
 import type { SessionIndexer, SessionTreeFilter } from "./session-indexer.js";
@@ -85,16 +86,23 @@ const BRIDGE_SESSION_IMPORTED_TYPE = "bridge_session_imported";
 const BRIDGE_INTERNAL_RPC_TIMEOUT_MS = 10_000;
 
 export function buildPiRpcArgs(sessionDirectory: string): string[] {
-    return [
+    const args: string[] = [
         "--mode",
         "rpc",
-        "--session-dir",
-        sessionDirectory,
+    ];
+
+    if (sessionDirectory !== DEFAULT_SESSION_DIRECTORY) {
+        args.push("--session-dir", sessionDirectory);
+    }
+
+    args.push(
         "--extension",
         PI_MOBILE_TREE_EXTENSION_PATH,
         "--extension",
         PI_MOBILE_WORKFLOW_EXTENSION_PATH,
-    ];
+    );
+
+    return args;
 }
 
 export function createBridgeServer(
@@ -1021,10 +1029,16 @@ async function importSessionJsonlIntoRuntime(options: {
 }): Promise<string> {
     const { cwd, content, requestedFileName, sessionDirectory, processManager, awaitRpcEvent } = options;
 
-    await mkdir(sessionDirectory, { recursive: true });
+    let targetSessionDirectory = sessionDirectory;
+    if (sessionDirectory === DEFAULT_SESSION_DIRECTORY) {
+        const sanitizedCwd = sanitizeCwdForSessionDir(cwd);
+        targetSessionDirectory = path.join(sessionDirectory, sanitizedCwd);
+    }
+
+    await mkdir(targetSessionDirectory, { recursive: true });
 
     const sanitizedFileName = sanitizeImportedSessionFileName(requestedFileName);
-    const sessionPath = await allocateImportedSessionPath(sessionDirectory, sanitizedFileName);
+    const sessionPath = await allocateImportedSessionPath(targetSessionDirectory, sanitizedFileName);
     await writeFile(sessionPath, content, "utf8");
 
     const switchRequestId = randomUUID();
@@ -1075,6 +1089,18 @@ async function allocateImportedSessionPath(
 
         suffix += 1;
     }
+}
+
+/**
+ * Replicates pi's own directory escaping logic to ensure imported sessions
+ * are placed in a directory structure consistent with sessions created by pi.
+ */
+export function sanitizeCwdForSessionDir(cwd: string): string {
+    const trimmed = cwd.replace(/^[/\\]+|[/\\]+$/g, "");
+    const sanitized = trimmed
+        .replace(/[/\\]/g, "-")
+        .replace(/[^a-zA-Z0-9._-]/g, "_");
+    return `--${sanitized}--`;
 }
 
 function sanitizeImportedSessionFileName(fileNameRaw: string | undefined): string {
