@@ -16,6 +16,7 @@ describe("parseBridgeConfig", () => {
             authToken: "test-token",
             processIdleTtlMs: 300_000,
             reconnectGraceMs: 30_000,
+            heartbeatIntervalMs: 1_000,
             sessionDirectory: path.join(os.homedir(), ".pi", "agent", "sessions"),
             enableHealthEndpoint: true,
         });

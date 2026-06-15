@@ -8,6 +8,7 @@ const DEFAULT_PORT = 8787;
 const DEFAULT_LOG_LEVEL: LevelWithSilent = "info";
 const DEFAULT_PROCESS_IDLE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_RECONNECT_GRACE_MS = 30 * 1000;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 1_000;
 const DEFAULT_SESSION_DIRECTORY = path.join(os.homedir(), ".pi", "agent", "sessions");
 
 export interface BridgeConfig {
@@ -17,6 +18,7 @@ export interface BridgeConfig {
     authToken: string;
     processIdleTtlMs: number;
     reconnectGraceMs: number;
+    heartbeatIntervalMs: number;
     sessionDirectory: string;
     enableHealthEndpoint: boolean;
 }
@@ -28,6 +30,7 @@ export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeC
     const authToken = parseAuthToken(env.BRIDGE_AUTH_TOKEN);
     const processIdleTtlMs = parseProcessIdleTtlMs(env.BRIDGE_PROCESS_IDLE_TTL_MS);
     const reconnectGraceMs = parseReconnectGraceMs(env.BRIDGE_RECONNECT_GRACE_MS);
+    const heartbeatIntervalMs = parseHeartbeatIntervalMs(env.BRIDGE_HEARTBEAT_INTERVAL_MS);
     const sessionDirectory = parseSessionDirectory(env.BRIDGE_SESSION_DIR);
     const enableHealthEndpoint = parseEnableHealthEndpoint(env.BRIDGE_ENABLE_HEALTH_ENDPOINT);
 
@@ -38,6 +41,7 @@ export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeC
         authToken,
         processIdleTtlMs,
         reconnectGraceMs,
+        heartbeatIntervalMs,
         sessionDirectory,
         enableHealthEndpoint,
     };
@@ -105,6 +109,17 @@ function parseReconnectGraceMs(graceRaw: string | undefined): number {
     }
 
     return graceMs;
+}
+
+function parseHeartbeatIntervalMs(intervalRaw: string | undefined): number {
+    if (!intervalRaw) return DEFAULT_HEARTBEAT_INTERVAL_MS;
+
+    const intervalMs = Number.parseInt(intervalRaw, 10);
+    if (Number.isNaN(intervalMs) || intervalMs < 100) {
+        throw new Error(`Invalid BRIDGE_HEARTBEAT_INTERVAL_MS: ${intervalRaw}`);
+    }
+
+    return intervalMs;
 }
 
 function parseEnableHealthEndpoint(enableHealthEndpointRaw: string | undefined): boolean {

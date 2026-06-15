@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createLogger } from "../src/logger.js";
 import {
@@ -181,9 +181,193 @@ describe("createPiProcessManager", () => {
         expect(events).toEqual([
             {
                 cwd: "/tmp/project-a",
+                internal: false,
                 payload: { id: "one", type: "response", success: true, command: "get_state" },
             },
         ]);
+    });
+});
+
+describe("PiProcessManager heartbeat", () => {
+    it("periodically sends get_state requests to unlocked processes when working", () => {
+        vi.useFakeTimers();
+        const fakeForwarder = new FakeRpcForwarder();
+        const manager = createPiProcessManager({
+            idleTtlMs: 60_000,
+            heartbeatIntervalMs: 1_000,
+            logger: createLogger("silent"),
+            forwarderFactory: () => fakeForwarder,
+        });
+
+        manager.getOrStart("/tmp/project-a");
+        fakeForwarder.emit({ type: "agent_start" });
+
+        vi.advanceTimersByTime(1_000);
+        expect(fakeForwarder.sentPayloads.some(p => (p as Record<string, unknown>).type === "get_state")).toBe(true);
+
+        vi.advanceTimersByTime(1_000);
+        expect(fakeForwarder.sentPayloads.filter(p => (p as Record<string, unknown>).type === "get_state")).toHaveLength(2);
+
+        vi.useRealTimers();
+    });
+
+    it("prevents eviction when agent is streaming", async () => {
+        vi.useFakeTimers();
+        let nowMs = 0;
+        const fakeForwarder = new FakeRpcForwarder();
+        const manager = createPiProcessManager({
+            idleTtlMs: 2_000,
+            heartbeatIntervalMs: 1_000,
+            logger: createLogger("silent"),
+            now: () => nowMs,
+            forwarderFactory: () => fakeForwarder,
+        });
+
+        manager.getOrStart("/tmp/project-a");
+
+        // 1s: Heartbeat sent, agent responds as streaming
+        vi.advanceTimersByTime(1_000);
+        nowMs += 1_000;
+        fakeForwarder.emit({ type: "response", command: "get_state", data: { isStreaming: true } });
+
+        // 1.5s more: Total 2.5s > TTL, but activity was updated at 1s
+        vi.advanceTimersByTime(1_500);
+        nowMs += 1_500;
+        await manager.evictIdleProcesses();
+
+        expect(fakeForwarder.stopped).toBe(false);
+        vi.useRealTimers();
+    });
+
+    it("allows eviction when agent is idle", async () => {
+        vi.useFakeTimers();
+        let nowMs = 0;
+        const fakeForwarder = new FakeRpcForwarder();
+        const manager = createPiProcessManager({
+            idleTtlMs: 2_000,
+            heartbeatIntervalMs: 1_000,
+            logger: createLogger("silent"),
+            now: () => nowMs,
+            forwarderFactory: () => fakeForwarder,
+        });
+
+        manager.getOrStart("/tmp/project-a");
+
+        // 1s: Heartbeat sent, agent responds as idle
+        vi.advanceTimersByTime(1_000);
+        nowMs += 1_000;
+        fakeForwarder.emit({ type: "response", command: "get_state", data: { isStreaming: false, isCompacting: false } });
+
+        // 1.5s more: Total 2.5s > TTL, and no activity update occurred since start (t=0)
+        vi.advanceTimersByTime(1_500);
+        nowMs += 1_500;
+        await manager.evictIdleProcesses();
+
+        expect(fakeForwarder.stopped).toBe(true);
+        vi.useRealTimers();
+    });
+
+    it("does not send heartbeats to locked processes", () => {
+        vi.useFakeTimers();
+        const fakeForwarder = new FakeRpcForwarder();
+        const manager = createPiProcessManager({
+            idleTtlMs: 60_000,
+            heartbeatIntervalMs: 1_000,
+            logger: createLogger("silent"),
+            forwarderFactory: () => fakeForwarder,
+        });
+
+        manager.acquireControl({ clientId: "client-a", cwd: "/tmp/project-a" });
+        manager.getOrStart("/tmp/project-a");
+
+        vi.advanceTimersByTime(1_000);
+        expect(fakeForwarder.sentPayloads).toEqual([]);
+
+        vi.useRealTimers();
+    });
+
+    it("stops polling when agent reports as idle", () => {
+        vi.useFakeTimers();
+        const fakeForwarder = new FakeRpcForwarder();
+        const manager = createPiProcessManager({
+            idleTtlMs: 60_000,
+            heartbeatIntervalMs: 1_000,
+            logger: createLogger("silent"),
+            forwarderFactory: () => fakeForwarder,
+        });
+
+        manager.getOrStart("/tmp/project-a");
+        fakeForwarder.emit({ type: "agent_start" });
+
+        // 1st heartbeat
+        vi.advanceTimersByTime(1_000);
+        expect(fakeForwarder.sentPayloads).toHaveLength(1);
+
+        // Respond as idle
+        fakeForwarder.emit({ type: "response", command: "get_state", data: { isStreaming: false, isCompacting: false } });
+
+        // 2nd interval: should NOT poll
+        vi.advanceTimersByTime(1_000);
+        expect(fakeForwarder.sentPayloads).toHaveLength(1);
+
+        vi.useRealTimers();
+    });
+
+    it("resumes polling when user sends RPC", () => {
+        vi.useFakeTimers();
+        const fakeForwarder = new FakeRpcForwarder();
+        const manager = createPiProcessManager({
+            idleTtlMs: 60_000,
+            heartbeatIntervalMs: 1_000,
+            logger: createLogger("silent"),
+            forwarderFactory: () => fakeForwarder,
+        });
+
+        manager.getOrStart("/tmp/project-a");
+        fakeForwarder.emit({ type: "agent_start" });
+
+        vi.advanceTimersByTime(1_000);
+        fakeForwarder.emit({ type: "response", command: "get_state", data: { isStreaming: false, isCompacting: false } });
+
+        vi.advanceTimersByTime(1_000);
+        expect(fakeForwarder.sentPayloads).toHaveLength(1);
+
+        // User action - Now this should NOT start polling based on new requirement
+        // but let's check that it indeed doesn't.
+        manager.sendRpc("/tmp/project-a", { type: "get_messages" });
+
+        vi.advanceTimersByTime(1_000);
+        expect(fakeForwarder.sentPayloads.filter(p => (p as Record<string, unknown>).type === "get_state")).toHaveLength(1);
+
+        vi.useRealTimers();
+    });
+
+    it("resumes polling when agent sends a regular event", () => {
+        vi.useFakeTimers();
+        const fakeForwarder = new FakeRpcForwarder();
+        const manager = createPiProcessManager({
+            idleTtlMs: 60_000,
+            heartbeatIntervalMs: 1_000,
+            logger: createLogger("silent"),
+            forwarderFactory: () => fakeForwarder,
+        });
+
+        manager.getOrStart("/tmp/project-a");
+        fakeForwarder.emit({ type: "agent_start" });
+
+        vi.advanceTimersByTime(1_000);
+        fakeForwarder.emit({ type: "response", command: "get_state", data: { isStreaming: false, isCompacting: false } });
+
+        vi.advanceTimersByTime(1_000);
+        expect(fakeForwarder.sentPayloads).toHaveLength(1);
+
+        // Agent event
+        fakeForwarder.emit({ type: "agent_start" });
+
+        vi.advanceTimersByTime(1_000);
+        expect(fakeForwarder.sentPayloads.filter(p => (p as Record<string, unknown>).type === "get_state")).toHaveLength(2);
+
+        vi.useRealTimers();
     });
 });
 

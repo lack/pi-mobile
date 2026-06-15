@@ -108,6 +108,7 @@ export function createBridgeServer(
     const processManager = dependencies.processManager ??
         createPiProcessManager({
             idleTtlMs: config.processIdleTtlMs,
+            heartbeatIntervalMs: config.heartbeatIntervalMs,
             logger: logger.child({ component: "process-manager" }),
             forwarderFactory: (cwd: string) => {
                 return createPiRpcForwarder(
@@ -228,6 +229,20 @@ export function createBridgeServer(
     }
 
     processManager.setMessageHandler((event) => {
+        const payload = event.payload as Record<string, unknown>;
+        const type = payload.type;
+
+        if (event.internal) {
+            return;
+        }
+
+        if (type === "response") {
+            logger.trace({ cwd: event.cwd, type, tag: "rpc-passthrough" }, "RPC response received");
+        } else {
+            logger.debug({ cwd: event.cwd, type, tag: "rpc-passthrough" }, "RPC event received from pi process");
+            logger.trace({ cwd: event.cwd, payload, tag: "rpc-passthrough" }, "RPC event payload");
+        }
+
         const consumedByInternalWaiter = drainMatchingWaiters(event);
 
         if (isSuccessfulRpcResponse(event.payload, "switch_session") ||

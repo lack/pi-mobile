@@ -5,6 +5,7 @@ import type { PiRpcForwarder, PiRpcForwarderMessage } from "./rpc-forwarder.js";
 export interface ProcessManagerEvent {
     cwd: string;
     payload: PiRpcForwarderMessage;
+    internal?: boolean;
 }
 
 export interface AcquireControlRequest {
@@ -45,6 +46,7 @@ export interface PiProcessManager {
 
 export interface ProcessManagerOptions {
     idleTtlMs: number;
+    heartbeatIntervalMs?: number;
     logger: Logger;
     forwarderFactory: (cwd: string) => PiRpcForwarder;
     now?: () => number;
@@ -55,6 +57,12 @@ interface ForwarderEntry {
     cwd: string;
     forwarder: PiRpcForwarder;
     lastUsedAt: number;
+    shouldPoll: boolean;
+    heartbeatId: string;
+    lastStatus?: {
+        isStreaming: boolean;
+        isCompacting: boolean;
+    };
 }
 
 interface SessionLock {
@@ -77,7 +85,19 @@ export function createPiProcessManager(options: ProcessManagerOptions): PiProces
         }, evictionIntervalMs)
         : undefined;
 
+    const heartbeatIntervalMs = options.heartbeatIntervalMs ?? 1_000;
+    const heartbeatTimer = shouldStartTimer
+        ? setInterval(() => {
+            for (const [cwd, entry] of entries.entries()) {
+                if (!lockByCwd.has(cwd) && entry.shouldPoll) {
+                    entry.forwarder.send({ id: entry.heartbeatId, type: "get_state" });
+                }
+            }
+        }, heartbeatIntervalMs)
+        : undefined;
+
     evictionTimer?.unref();
+    heartbeatTimer?.unref();
 
     const getOrStart = (cwd: string): PiRpcForwarder => {
         const existingEntry = entries.get(cwd);
@@ -87,15 +107,73 @@ export function createPiProcessManager(options: ProcessManagerOptions): PiProces
         }
 
         const forwarder = options.forwarderFactory(cwd);
+        const heartbeatId = `bridge-heartbeat-${Math.random().toString(36).slice(2, 11)}`;
         const entry: ForwarderEntry = {
             cwd,
             forwarder,
             lastUsedAt: now(),
+            shouldPoll: false,
+            heartbeatId,
         };
 
         forwarder.setMessageHandler((payload) => {
-            entry.lastUsedAt = now();
-            messageHandler({ cwd, payload });
+            const isHeartbeatResponse = payload.type === "response" && payload.command === "get_state";
+            const isInternalHeartbeat = isHeartbeatResponse && payload.id === entry.heartbeatId;
+            const data = isHeartbeatResponse ? (payload.data as Record<string, unknown>) : null;
+            const isWorking = !!(data && ((data.isStreaming as boolean) === true || (data.isCompacting as boolean) === true));
+
+            const wasPolling = entry.shouldPoll;
+
+            if (isHeartbeatResponse) {
+                if (data) {
+                    const currentStatus = {
+                        isStreaming: !!data.isStreaming,
+                        isCompacting: !!data.isCompacting,
+                    };
+
+                    options.logger.debug({ cwd, status: currentStatus, tag: "bridge-heartbeat" }, "RPC heartbeat response");
+
+                    if (entry.lastStatus) {
+                        if (
+                            entry.lastStatus.isStreaming !== currentStatus.isStreaming ||
+                            entry.lastStatus.isCompacting !== currentStatus.isCompacting
+                        ) {
+                            options.logger.info(
+                                {
+                                    cwd,
+                                    prev: entry.lastStatus,
+                                    next: currentStatus,
+                                    tag: "bridge-heartbeat",
+                                },
+                                "RPC process status changed",
+                            );
+                        }
+                    }
+                    entry.lastStatus = currentStatus;
+                    entry.shouldPoll = isWorking;
+                }
+            } else {
+                const eventType = payload.type as string;
+                if (eventType === "agent_start" || eventType === "compaction_start") {
+                    entry.shouldPoll = true;
+                }
+            }
+
+            if (!wasPolling && entry.shouldPoll) {
+                options.logger.info(
+                    {
+                        cwd,
+                        reason: isHeartbeatResponse ? "heartbeat-working" : "agent-activity-start",
+                        tag: "bridge-heartbeat",
+                    },
+                    "Starting heartbeat polling",
+                );
+            }
+
+            if (!isHeartbeatResponse || isWorking) {
+                entry.lastUsedAt = now();
+            }
+            messageHandler({ cwd, payload, internal: isInternalHeartbeat });
         });
         forwarder.setLifecycleHandler((event) => {
             options.logger.info({ cwd, event }, "RPC forwarder lifecycle event");
@@ -132,7 +210,9 @@ export function createPiProcessManager(options: ProcessManagerOptions): PiProces
         sendRpc(cwd: string, payload: Record<string, unknown>): void {
             const forwarder = getOrStart(cwd);
             const entry = entries.get(cwd);
-            if (entry) entry.lastUsedAt = now();
+            if (entry) {
+                entry.lastUsedAt = now();
+            }
             forwarder.send(payload);
         },
         acquireControl(request: AcquireControlRequest): AcquireControlResult {
@@ -229,6 +309,9 @@ export function createPiProcessManager(options: ProcessManagerOptions): PiProces
         async stop(): Promise<void> {
             if (evictionTimer) {
                 clearInterval(evictionTimer);
+            }
+            if (heartbeatTimer) {
+                clearInterval(heartbeatTimer);
             }
 
             for (const entry of entries.values()) {
